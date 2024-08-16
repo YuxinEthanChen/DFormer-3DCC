@@ -7,7 +7,7 @@ MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export CUDA_VISIBLE_DEVICES="0,1"
 export TORCHDYNAMO_VERBOSE=1
 
-PYTHONPATH="$(dirname $0)/..":"$(dirname $0)":$PYTHONPATH \
+PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
 python -m torch.distributed.launch  \
     --nnodes=$NNODES \
     --node_rank=$NODE_RANK \
@@ -15,12 +15,12 @@ python -m torch.distributed.launch  \
     --nproc_per_node=$GPUS \
     --master_port=$PORT  \
     utils/train.py \
-    --config=local_configs.NYUDepthv2.DFormer_Large\
+    --config=local_configs.SegSTRONGC.DFormer_Large\
     --gpus=$GPUS \
     --no-sliding \
     --no-compile \
     --syncbn \
-    --mst \
+    --no-mst \
     --compile_mode="default" \
     --no-amp \
     --val_amp \
