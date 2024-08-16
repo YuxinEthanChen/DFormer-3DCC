@@ -13,6 +13,7 @@ from tqdm import tqdm
 from tabulate import tabulate
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
+from torchvision import transforms as T
 
 # from semseg.models import *
 # from semseg.datasets import *
@@ -100,6 +101,10 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
         if len(labels.shape) == 2:
             labels = labels.unsqueeze(0)
         # print(images.shape,labels.shape)
+        transform = T.Resize((config.image_height, config.image_width))
+        images = transform(images)
+        modal_xs = transform(modal_xs)
+        labels = transform(labels)
         images = [images.to(device), modal_xs.to(device)]
         labels = labels.to(device)
         if sliding:
