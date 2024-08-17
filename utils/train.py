@@ -11,6 +11,9 @@ from utils.dataloader.dataloader import get_train_loader, get_val_loader
 from models.builder import EncoderDecoder as segmodel
 from utils.dataloader.RGBXDataset import RGBXDataset
 
+from utils.refocus_augmentation import RefocusImageAugmentation
+from utils.augmentation import Augmentation
+
 from utils.init_func import group_weight
 from utils.init_func import configure_optimizers
 from utils.lr_policy import WarmUpPolyLR
@@ -316,6 +319,28 @@ with Engine(custom_parser=parser) as engine:
             imgs = imgs.cuda(non_blocking=True)
             gts = gts.cuda(non_blocking=True)
             modal_xs = modal_xs.cuda(non_blocking=True)
+
+            # print('img size[0]: ', imgs[0].shape)
+
+            # Add 3DCC data augmentation
+            aug = Augmentation()
+
+            for i in range(len(minibatch)):
+                batch = {'positive': {'rgb': None, 'depth_euclidean': None, 'reshading': None}}
+                
+                batch['positive']['rgb'] = imgs[i]
+                batch['positive']['depth_euclidean'] = modal_xs[i]
+
+                augmented_rgb = aug.augment_rgb(batch)
+
+                augmented_rgb = augmented_rgb.squeeze(0)
+
+                # print("augmented_rgb shape: ", augmented_rgb.shape)
+
+                imgs[i] = augmented_rgb
+
+
+            
 
             if args.amp:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
