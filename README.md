@@ -1,3 +1,12 @@
+## Add 3DCC to DFormer
+
+**0. Install Additional Packages for 3DCC**
+
+```bash
+pip install panda seaborn kornia scikit-image
+
+```
+
 # <p align=center>`DFormer: Rethinking RGBD Representation Learning for Semantic Segmentation (ICLR 2024)`</p>
 
 <!-- [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/dformer-rethinking-rgbd-representation/semantic-segmentation-on-nyu-depth-v2)](https://paperswithcode.com/sota/semantic-segmentation-on-nyu-depth-v2?p=dformer-rethinking-rgbd-representation)
