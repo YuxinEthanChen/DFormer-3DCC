@@ -1,4 +1,5 @@
 import random
+import torch
 import torch.nn.functional as F
 import sys
 import os
@@ -95,9 +96,9 @@ class Augmentation:
                     else:
                         aug = zoom_blur
                         augmented_rgb = aug(augmented_rgb)
-                    print(aug)
+                    # print(aug)
                 except:
-                    print("No 2D aug!")
+                    # print("No 2D aug!")
                     augmented_rgb = augmented_rgb
 
             # New 3D augmentations
@@ -109,74 +110,82 @@ class Augmentation:
                     # reshade = reshade.cuda().unsqueeze(0)
                 
                 if p < 0.2:
-                    print('fog3d')
+                    # print('fog3d')
                     augmented_rgb = fog_3d(augmented_rgb, depth_euclid)
                 elif p < 0.4:
-                    print('flash')
+                    p = p
+                    # print('flash')
                     # augmented_rgb = flash_3d(augmented_rgb, reshade)
                 elif p < 0.6:
-                    print('defocus3d')
+                    # print('defocus3d')
                     augmented_rgb = defocus_blur_3d_random(augmented_rgb, depth_euclid) 
                 elif p < 0.8:
-                    print('motion3d')
+                    # print('motion3d')
                     augmented_rgb = motionkornia_blur_3d(augmented_rgb, depth_euclid)
                 else:
-                    print('zoom3d')
+                    # print('zoom3d')
                     augmented_rgb = zoomkornia_blur_3d(augmented_rgb, depth_euclid)
 
 
             # normalize back
             augmented_rgb = (augmented_rgb-0.5) / 0.5
             return augmented_rgb
+    
+    def crop_augmentation(self, batch, tasks, fixed_size=[None, None]):
+    
+        original_h = fixed_size[0]
+        original_w = fixed_size[1]
 
-    def resize_augmentation(self, batch, tasks, fixed_size=None):
+        aspect_ratio = original_w / original_h
+
         p = random.random()
+        resize_method = 'centercrop' if p < 0.7 else 'randomcrop'
 
-        if p < 0.4:
-            resize_method = 'centercrop'
-        elif p < 0.7:
-            resize_method = 'randomcrop'
-        else:
-            resize_method = 'resize'
-
-        if fixed_size is not None: 
-            h = fixed_size
-            w = fixed_size
-        else:
-            img_sizes = [256, 320, 384, 448, 512]
-            while True:
-                h = random.choice(img_sizes)
-                w = random.choice(img_sizes)
-                if resize_method == 'resize':
-                    if h < 1.5 * w and w < 1.5 * h: break
-                else:   
-                    if h < 2 * w and w < 2 * h: break
-
-
-        if resize_method == 'randomcrop':
-            min_x, min_y = 0, 0
-            size_x, size_y = batch[tasks[0]].shape[-2], batch[tasks[0]].shape[-1]
-            if size_x != h:
-                min_x = random.randrange(0, size_x - h - 2)
-            if size_y != w:
-                min_y = random.randrange(0, size_y - w - 2)
+        img_sizes = [270, 432, 540, 648, 720, 810, 864, 900]
+        h = random.choice(img_sizes)
+        w = int(h * aspect_ratio)
 
         for task in tasks:
             if len(batch[task].shape) == 3:
                 batch[task] = batch[task].unsqueeze(axis=0)
+            elif len(batch[task].shape) == 2:
+                batch[task] = batch[task].unsqueeze(axis=0).unsqueeze(axis=1)
+
+
+            crop_h = min(h, original_h)
+            crop_w = min(w, original_w)
+
+            original_dtype = batch[task].dtype  # Save the original data type
 
             if resize_method == 'centercrop':
-                centercrop = CenterCrop((h, w), p=1.)
+                centercrop = CenterCrop((crop_h, crop_w), p=1.)
+                
+                # Temporarily convert the tensor to float32 for the augmentation
+                batch[task] = batch[task].to(torch.float32)
+                
+                # Apply the centercrop or any other Kornia augmentation
                 batch[task] = centercrop(batch[task])
+                
+                # Convert the tensor back to its original data type
+                batch[task] = batch[task].to(original_dtype)
 
             elif resize_method == 'randomcrop':
-                batch[task] = batch[task][:, :, min_x:min_x + h, min_y:min_y + w]
+                min_x = random.randint(0, original_w - crop_w)
+                min_y = random.randint(0, original_h - crop_h)
 
-            elif resize_method == 'resize':
+                batch[task] = batch[task][:, :, min_y:min_y + crop_h, min_x:min_x + crop_w]
 
-                if task == 'rgb':
-                    batch[task] = F.interpolate(batch[task], (h, w), mode='bilinear')
-                else:
-                    batch[task] = F.interpolate(batch[task], (h, w), mode='nearest')
+            # Resize to original dimensions
+            if original_dtype == torch.int64:
+                batch[task] = batch[task].to(torch.float32)
+
+            batch[task] = F.interpolate(batch[task], (original_h, original_w), mode='bilinear' if task == 'rgb' else 'nearest')
+        
+            if task == 'gt':
+                batch[task] = batch[task].squeeze(axis=0)
+
+            # Convert the tensor back to its original data type
+            if original_dtype == torch.int64:
+                batch[task] = batch[task].to(original_dtype)
 
         return batch

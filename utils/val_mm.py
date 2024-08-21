@@ -20,6 +20,9 @@ from torchvision import transforms as T
 # from semseg.augmentations_mm import get_val_augmentation
 from utils.metrics_new import Metrics
 
+from utils.refocus_augmentation import RefocusImageAugmentation
+from utils.augmentation import Augmentation
+
 # from semseg.utils.utils import setup_cudnn
 from math import ceil
 import numpy as np
@@ -105,8 +108,32 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
         images = transform(images)
         modal_xs = transform(modal_xs)
         labels = transform(labels)
-        images = [images.to(device), modal_xs.to(device)]
+        images = images.to(device)
+        modal_xs = modal_xs.to(device)
         labels = labels.to(device)
+        
+        # Add 3DCC data augmentation
+        aug = Augmentation()
+
+        for i in range(minibatch["data"].shape[0]):
+            batch = {'positive': {'rgb': None, 'depth_euclidean': None, 'gt': None, 'reshading': None}}
+            
+            batch['positive']['rgb'] = images[i]
+            batch['positive']['depth_euclidean'] = modal_xs[i]
+            batch['positive']['gt'] = labels[i]
+
+            # Crop
+            tasks = ['rgb','depth_euclidean', 'gt']
+            batch['positive'] = aug.crop_augmentation(batch['positive'], tasks, fixed_size=[config.image_height, config.image_width])
+
+            augmented_rgb = aug.augment_rgb(batch)
+
+            augmented_rgb = augmented_rgb.squeeze(0)
+
+            images[i] = augmented_rgb
+
+        images = [images.to(device), modal_xs.to(device)]
+
         if sliding:
             preds = slide_inference(model, images, modal_xs, config).softmax(dim=1)
         else:

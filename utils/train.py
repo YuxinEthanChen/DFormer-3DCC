@@ -25,6 +25,8 @@ from val_mm import evaluate, evaluate_msf
 from importlib import import_module
 import datetime
 
+import matplotlib.pyplot as plt
+
 # from eval import evaluate_mid
 
 
@@ -320,32 +322,73 @@ with Engine(custom_parser=parser) as engine:
             gts = gts.cuda(non_blocking=True)
             modal_xs = modal_xs.cuda(non_blocking=True)
 
-            # print('img size[0]: ', imgs[0].shape)
-
             # Add 3DCC data augmentation
             aug = Augmentation()
 
-            for i in range(len(minibatch)):
-                batch = {'positive': {'rgb': None, 'depth_euclidean': None, 'reshading': None}}
-                
+            for i in range(minibatch["data"].shape[0]):
+                batch = {'positive': {'rgb': None, 'depth_euclidean': None, 'gt': None, 'reshading': None}}
+            
                 batch['positive']['rgb'] = imgs[i]
                 batch['positive']['depth_euclidean'] = modal_xs[i]
+                batch['positive']['gt'] = gts[i]
 
+                # augmentation
+                # Crop
+                tasks = ['rgb','depth_euclidean', 'gt']
+                batch['positive'] = aug.crop_augmentation(batch['positive'],tasks, fixed_size=[config.image_height, config.image_width])
+
+                # # Visulization
+                # # Original Image (before augmentation)
+                # original_rgb = imgs[i].permute(1, 2, 0).cpu().numpy()  # Convert to HxWxC
+
+                # # If original image is in BGR format, convert to RGB
+                # original_rgb = original_rgb[..., [2, 1, 0]]  # Swap BGR to RGB
+
+                # # Normalize original image to [0, 1] range
+                # original_rgb = (original_rgb - original_rgb.min()) / (original_rgb.max() - original_rgb.min())
+
+                # Augmentation
                 augmented_rgb = aug.augment_rgb(batch)
-
                 augmented_rgb = augmented_rgb.squeeze(0)
-
-                # print("augmented_rgb shape: ", augmented_rgb.shape)
-
                 imgs[i] = augmented_rgb
 
+                # # Visulization
+                # # Convert to NumPy if necessary
+                # augmented_rgb_vis = augmented_rgb.permute(1, 2, 0).cpu().numpy()  # Change from CxHxW to HxWxC
 
-            
+                # # If the image is in BGR, convert it to RGB
+                # augmented_rgb_vis = augmented_rgb_vis[..., [2, 1, 0]] # Swap BGR to RGB
+
+                # # Normalize to [0, 1]
+                # augmented_rgb_vis = (augmented_rgb_vis - augmented_rgb_vis.min()) / (augmented_rgb_vis.max() - augmented_rgb_vis.min())
+
+                # # Display the original and augmented images side by side
+                # plt.figure(figsize=(10, 5))
+
+                # # Original Image
+                # plt.subplot(1, 2, 1)
+                # plt.imshow(original_rgb)
+                # plt.title('Original Image')
+                # plt.axis('off')
+
+                # # Augmented Image
+                # plt.subplot(1, 2, 2)
+                # plt.imshow(augmented_rgb_vis)
+                # plt.title('Augmented Image')
+                # plt.axis('off')
+
+                # plt.show()
 
             if args.amp:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
+                    # print(imgs.shape) # (B, D, H, W)
+                    # print(modal_xs.shape) # (B, 1, H, W)
+                    # print(gts.shape) # (B, H, W)
                     loss = model(imgs, modal_xs, gts)
             else:
+                # print(imgs.shape) # (B, D, H, W)
+                # print(modal_xs.shape) # (B, 1, H, W)
+                # print(gts.shape) # (B, H, W)
                 loss = model(imgs, modal_xs, gts)
 
             # reduce the whole loss over multi-gpu

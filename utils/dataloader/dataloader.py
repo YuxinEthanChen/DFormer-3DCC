@@ -42,10 +42,11 @@ class TrainPre(object):
 
     def __call__(self, rgb, gt, modal_x):
         rgb, gt, modal_x = random_mirror(rgb, gt, modal_x)
-        if self.config.train_scale_array is not None:
-            rgb, gt, modal_x, scale = random_scale(
-                rgb, gt, modal_x, self.config.train_scale_array
-            )
+        # # Turn off scale
+        # if self.config.train_scale_array is not None:
+        #     rgb, gt, modal_x, scale = random_scale(
+        #         rgb, gt, modal_x, self.config.train_scale_array
+        #     )
 
         rgb = normalize(rgb, self.norm_mean, self.norm_std)
         if self.sign:
@@ -57,12 +58,19 @@ class TrainPre(object):
 
         # return rgb.transpose(2, 0, 1), gt, modal_x.transpose(2, 0, 1)
 
-        crop_size = (self.config.image_height, self.config.image_width)
-        crop_pos = generate_random_crop_pos(rgb.shape[:2], crop_size)
+        # # Turn off crop
+        # crop_size = (self.config.image_height, self.config.image_width)
+        # crop_pos = generate_random_crop_pos(rgb.shape[:2], crop_size)
 
-        p_rgb, _ = random_crop_pad_to_shape(rgb, crop_pos, crop_size, 0)
-        p_gt, _ = random_crop_pad_to_shape(gt, crop_pos, crop_size, 255)
-        p_modal_x, _ = random_crop_pad_to_shape(modal_x, crop_pos, crop_size, 0)
+        # p_rgb, _ = random_crop_pad_to_shape(rgb, crop_pos, crop_size, 0)
+        # p_gt, _ = random_crop_pad_to_shape(gt, crop_pos, crop_size, 255)
+        # p_modal_x, _ = random_crop_pad_to_shape(modal_x, crop_pos, crop_size, 0)
+
+        # Resize instead of crop
+        resize_size = (self.config.image_height, self.config.image_width)
+        p_rgb = cv2.resize(rgb, resize_size)
+        p_gt = cv2.resize(gt, resize_size, interpolation=cv2.INTER_NEAREST)
+        p_modal_x = cv2.resize(modal_x, resize_size)
 
         p_rgb = p_rgb.transpose(2, 0, 1)
         p_modal_x = p_modal_x.transpose(2, 0, 1)
@@ -92,6 +100,11 @@ class ValPre(object):
     def __call__(self, rgb, gt, modal_x):
         rgb = normalize(rgb, self.norm_mean, self.norm_std)
         modal_x = normalize(modal_x, [0.48, 0.48, 0.48], [0.28, 0.28, 0.28])
+        # Resize instead of crop
+        resize_size = (self.config.image_height, self.config.image_width)
+        rgb = cv2.resize(rgb, resize_size)
+        gt = cv2.resize(gt, resize_size, interpolation=cv2.INTER_NEAREST)
+        modal_x = cv2.resize(modal_x, resize_size)
         return rgb.transpose(2, 0, 1), gt, modal_x.transpose(2, 0, 1)
         # return rgb, gt, modal_x
 
@@ -137,12 +150,11 @@ def get_train_loader(engine, dataset, config):
         num_workers=config.num_workers,
         drop_last=True,
         shuffle=is_shuffle,
-        pin_memory=False, #True,
+        pin_memory=True,
         sampler=train_sampler,
         # worker_init_fn=seed_worker,
         # generator=g,
     )
-
     return train_loader, train_sampler
 
 
@@ -182,7 +194,7 @@ def get_val_loader(engine, dataset, config, val_batch_size=1):
         num_workers=config.num_workers,
         drop_last=False,
         shuffle=is_shuffle,
-        pin_memory=False, #True,
+        pin_memory=True,
         sampler=val_sampler,
         # worker_init_fn=seed_worker,
         # generator=g,

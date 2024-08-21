@@ -58,6 +58,12 @@ def separable_gaussian(img, r=3.5, cutoff=None, device=None):
     if cutoff is None:
         cutoff = int(r * 5)
         if (cutoff % 2) == 0: cutoff += 1
+    
+    # Reduce cutoff if the filter size is too large
+    max_size = 2**14 - 1  # Example size limit, adjust as needed
+    if cutoff > max_size:
+        cutoff = max_size
+        # print(f"Reduced cutoff to {cutoff} to avoid 32-bit indexing issues.")
 
     assert (cutoff % 2) == 1
     img = img.to(device)
@@ -206,7 +212,7 @@ def defocus_blur_3d_random(rgb_batch, depth_batch):
             log_min = torch.log(torch.tensor(aperture_min, device=device))
             log_max = torch.log(torch.tensor(aperture_max, device=device))
             aperture = torch.exp(torch.rand(size=(rgb.shape[0],1), device=device) * (log_max - log_min) + log_min + log_min )    
-            print(aperture)
+            # print(aperture)
 
             # randomly select focal plane index
             focus_dist_idxs = torch.tensor(np.random.randint(low = 0, high = n_quantiles + 1, size = (1,))).cuda()
@@ -348,17 +354,33 @@ def motionkornia_blur_3d(rgb_batch, depth_batch):
 
 ######Zoom 3D kornia
 from scipy.ndimage import zoom as scizoom
+# def clipped_zoom(img, zoom_factor):
+#     h = img.shape[0]
+#     # ceil crop height(= crop width)
+#     ch = int(np.ceil(h / zoom_factor))
+
+#     top = (h - ch) // 2
+#     img = scizoom(img[top:top + ch, top:top + ch], (zoom_factor, zoom_factor, 1), order=1)
+#     # trim off any extra pixels
+#     trim_top = (img.shape[0] - h) // 2
+
+#     return img[trim_top:trim_top + h, trim_top:trim_top + h]
+
 def clipped_zoom(img, zoom_factor):
     h = img.shape[0]
+    w = img.shape[1]    
     # ceil crop height(= crop width)
     ch = int(np.ceil(h / zoom_factor))
+    ch_w = int(np.ceil(w / zoom_factor))
 
     top = (h - ch) // 2
-    img = scizoom(img[top:top + ch, top:top + ch], (zoom_factor, zoom_factor, 1), order=1)
+    top_w = (w - ch_w)//2
+    img = scizoom(img[top:top + ch, top_w:top_w + ch_w], (zoom_factor, zoom_factor, 1), order=1)
     # trim off any extra pixels
     trim_top = (img.shape[0] - h) // 2
+    trim_top_w = (img.shape[1] - w) // 2
 
-    return img[trim_top:trim_top + h, trim_top:trim_top + h]
+    return img[trim_top:trim_top + h, trim_top_w:trim_top_w + w]
 
 def zoom_blur_2d(x, blur=1.):
     blur = blur.detach().cpu().numpy().item()
