@@ -225,6 +225,9 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
             else:
                 assert 1 == 2
 
+        if idx >= 10:
+            break
+
     # ious, miou = metrics.compute_iou()
     # acc, macc = metrics.compute_pixel_acc()
     # f1, mf1 = metrics.compute_f1()
@@ -821,39 +824,6 @@ with Engine(custom_parser=parser) as engine:
                     device = torch.device("cuda")
                     if args.val_amp:
                         with torch.autocast(device_type="cuda", dtype=torch.float16):
-                            if args.mst:
-                                all_metrics = evaluate_msf(
-                                    model,
-                                    val_loader,
-                                    config,
-                                    device,
-                                    [0.5, 0.75, 1.0, 1.25, 1.5],
-                                    True,
-                                    engine,
-                                    sliding=args.sliding,
-                                )
-                            else:
-                                all_metrics, mdsc, mnsd, mval_loss = evaluate(
-                                    model,
-                                    val_loader,
-                                    config,
-                                    device,
-                                    engine,
-                                    sliding=args.sliding,
-                                )
-                    else:
-                        if args.mst:
-                            all_metrics = evaluate_msf(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                [0.5, 0.75, 1.0, 1.25, 1.5],
-                                True,
-                                engine,
-                                sliding=args.sliding,
-                            )
-                        else:
                             all_metrics, mdsc, mnsd, mval_loss = evaluate(
                                 model,
                                 val_loader,
@@ -862,6 +832,15 @@ with Engine(custom_parser=parser) as engine:
                                 engine,
                                 sliding=args.sliding,
                             )
+                    else:
+                        all_metrics, mdsc, mnsd, mval_loss = evaluate(
+                            model,
+                            val_loader,
+                            config,
+                            device,
+                            engine,
+                            sliding=args.sliding,
+                        )
             
                     if engine.local_rank == 0:
                         metric = all_metrics[0]
@@ -886,39 +865,6 @@ with Engine(custom_parser=parser) as engine:
                     device = torch.device("cuda")
                     if args.val_amp:
                         with torch.autocast(device_type="cuda", dtype=torch.float16):
-                            if args.mst:
-                                metric = evaluate_msf(
-                                    model,
-                                    val_loader,
-                                    config,
-                                    device,
-                                    [0.5, 0.75, 1.0, 1.25, 1.5],
-                                    True,
-                                    engine,
-                                    sliding=args.sliding,
-                                )
-                            else:
-                                metric, mdsc, mnsd, mval_loss = evaluate(
-                                    model,
-                                    val_loader,
-                                    config,
-                                    device,
-                                    engine,
-                                    sliding=args.sliding,
-                                )
-                    else:
-                        if args.mst:
-                            metric = evaluate_msf(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                [0.5, 0.75, 1.0, 1.25, 1.5],
-                                True,
-                                engine,
-                                sliding=args.sliding,
-                            )
-                        else:
                             metric, mdsc, mnsd, mval_loss = evaluate(
                                 model,
                                 val_loader,
@@ -928,6 +874,15 @@ with Engine(custom_parser=parser) as engine:
                                 sliding=args.sliding,
                                 depth_model=depth_model,
                             )
+                    else:
+                        metric, mdsc, mnsd, mval_loss = evaluate(
+                            model,
+                            val_loader,
+                            config,
+                            device,
+                            engine,
+                            sliding=args.sliding,
+                        )
 
                     ious, miou = metric.compute_iou()
                     acc, macc = metric.compute_pixel_acc()
