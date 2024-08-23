@@ -43,7 +43,7 @@ class RGBXDataset(data.Dataset):
         # item_name[-1]=item_name[-1].replace("\n","")
             
         rgb_path = os.path.join(self._rgb_path, item_name.replace('.jpg','').replace('.png','') + self._rgb_format)
-        x_path = os.path.join(self._x_path, item_name.replace('.jpg','').replace('.png','')  + self._x_format)
+        # x_path = os.path.join(self._x_path, item_name.replace('.jpg','').replace('.png','')  + self._x_format)
         gt_path = os.path.join(self._gt_path, item_name.replace('.jpg','').replace('.png','')  + self._gt_format)
 
         # rgb_path = os.path.join(self._rgb_path, item_name[0].replace("rgb/",""))
@@ -57,26 +57,30 @@ class RGBXDataset(data.Dataset):
         if self._transform_gt:
             gt = self._gt_transform(gt) 
 
-        if self._x_single_channel:
-            x = self._open_image(x_path, cv2.IMREAD_GRAYSCALE)
-            x = cv2.merge([x, x, x])
-        else:
-            x =  self._open_image(x_path, cv2.COLOR_BGR2RGB)
+        # if self._x_single_channel:
+        #     x = self._open_image(x_path, cv2.IMREAD_GRAYSCALE)
+        #     x = cv2.merge([x, x, x])
+        # else:
+        #     x =  self._open_image(x_path, cv2.COLOR_BGR2RGB)
+
+        # x = predict_depth(rgb)
         
         if self.preprocess is not None:
-            rgb, gt, x = self.preprocess(rgb, gt, x)
+            rgb, gt = self.preprocess(rgb, gt)
 
         if self._split_name == 'train':
             rgb = torch.from_numpy(np.ascontiguousarray(rgb)).float()
             gt = torch.from_numpy(np.ascontiguousarray(gt)).long()
-            x = torch.from_numpy(np.ascontiguousarray(x)).float()
+            # x = torch.from_numpy(np.ascontiguousarray(x)).float()
         else:
             rgb = torch.from_numpy(np.ascontiguousarray(rgb)).float()
             gt = torch.from_numpy(np.ascontiguousarray(gt)).long()
-            x = torch.from_numpy(np.ascontiguousarray(x)).float()
+            # x = torch.from_numpy(np.ascontiguousarray(x)).float()
 
-        output_dict = dict(data=rgb, label=gt, modal_x=x, fn=str(item_name), n=len(self._file_names))
+        # output_dict = dict(data=rgb, label=gt, modal_x=x, fn=str(item_name), n=len(self._file_names))
+        output_dict = dict(data=rgb, label=gt, fn=str(item_name), n=len(self._file_names))
 
+        # output images are RGB
         return output_dict
 
     def _get_file_names(self, split_name):

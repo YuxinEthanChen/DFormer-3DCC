@@ -26,7 +26,7 @@ C.class_names = ["background", "object"]
 
 """Image Config"""
 C.background = 255
-C.image_height = 512
-C.image_width = 512
+C.image_height = 256
+C.image_width = 256
 C.norm_mean = np.array([0.485, 0.456, 0.406])
 C.norm_std = np.array([0.229, 0.224, 0.225])
