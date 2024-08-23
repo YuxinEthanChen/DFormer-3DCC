@@ -31,6 +31,7 @@ from torch.utils.data import DistributedSampler, RandomSampler
 from torch import distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import cv2
+from train import predict_depth
 
 # from semseg.utils.utils import fix_seeds, setup_cudnn, cleanup_ddp, setup_ddp, get_logger, cal_flops, print_iou
 
@@ -83,7 +84,7 @@ import cv2
 
 
 @torch.no_grad()
-def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=False):
+def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=False, depth_model=None):
     print("Evaluating...")
     model.eval()
     n_classes = config.num_classes
@@ -102,7 +103,11 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
             print(f"Validation Iter: {idx + 1} / {len(dataloader)}")
         images = minibatch["data"]
         labels = minibatch["label"]
-        modal_xs = minibatch["modal_x"]
+        # modal_xs = minibatch["modal_x"]
+        # predict depth using depth model
+        breakpoint()
+        modal_xs = predict_depth(depth_model, images)
+        breakpoint()
         if len(images.shape) == 3:
             images = images.unsqueeze(0)
         if len(modal_xs.shape) == 3:

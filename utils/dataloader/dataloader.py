@@ -40,21 +40,21 @@ class TrainPre(object):
         self.norm_std = norm_std
         self.sign = sign
 
-    def __call__(self, rgb, gt, modal_x):
-        rgb, gt, modal_x = random_mirror(rgb, gt, modal_x)
+    def __call__(self, rgb, gt):
+        # rgb, gt = random_mirror(rgb, gt)
         # # Turn off scale
         # if self.config.train_scale_array is not None:
         #     rgb, gt, modal_x, scale = random_scale(
         #         rgb, gt, modal_x, self.config.train_scale_array
         #     )
 
-        rgb = normalize(rgb, self.norm_mean, self.norm_std)
-        if self.sign:
-            modal_x = normalize(
-                modal_x, [0.48, 0.48, 0.48], [0.28, 0.28, 0.28]
-            )  # [0.5,0.5,0.5]
-        else:
-            modal_x = normalize(modal_x, self.norm_mean, self.norm_std)
+        # rgb = normalize(rgb, self.norm_mean, self.norm_std)
+        # if self.sign:
+        #     modal_x = normalize(
+        #         modal_x, [0.48, 0.48, 0.48], [0.28, 0.28, 0.28]
+        #     )  # [0.5,0.5,0.5]
+        # else:
+        #     modal_x = normalize(modal_x, self.norm_mean, self.norm_std)
 
         # return rgb.transpose(2, 0, 1), gt, modal_x.transpose(2, 0, 1)
 
@@ -70,15 +70,15 @@ class TrainPre(object):
         resize_size = (self.config.image_height, self.config.image_width)
         p_rgb = cv2.resize(rgb, resize_size)
         p_gt = cv2.resize(gt, resize_size, interpolation=cv2.INTER_NEAREST)
-        p_modal_x = cv2.resize(modal_x, resize_size)
+        # p_modal_x = cv2.resize(modal_x, resize_size)
 
         p_rgb = p_rgb.transpose(2, 0, 1)
-        p_modal_x = p_modal_x.transpose(2, 0, 1)
+        # p_modal_x = p_modal_x.transpose(2, 0, 1)
         # p_rgb = p_rgb
         # p_modal_x = p_modal_x
 
-        return p_rgb, p_gt, p_modal_x
-
+        # return p_rgb, p_gt, p_modal_x
+        return p_rgb, p_gt
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
@@ -97,15 +97,15 @@ class ValPre(object):
         self.norm_std = norm_std
         self.sign = sign
 
-    def __call__(self, rgb, gt, modal_x):
-        rgb = normalize(rgb, self.norm_mean, self.norm_std)
-        modal_x = normalize(modal_x, [0.48, 0.48, 0.48], [0.28, 0.28, 0.28])
+    def __call__(self, rgb, gt):
+        # rgb = normalize(rgb, self.norm_mean, self.norm_std)
+        # modal_x = normalize(modal_x, [0.48, 0.48, 0.48], [0.28, 0.28, 0.28])
         # Resize instead of crop
         resize_size = (self.config.image_height, self.config.image_width)
         rgb = cv2.resize(rgb, resize_size)
         gt = cv2.resize(gt, resize_size, interpolation=cv2.INTER_NEAREST)
-        modal_x = cv2.resize(modal_x, resize_size)
-        return rgb.transpose(2, 0, 1), gt, modal_x.transpose(2, 0, 1)
+        # modal_x = cv2.resize(modal_x, resize_size)
+        return rgb.transpose(2, 0, 1), gt
         # return rgb, gt, modal_x
 
 

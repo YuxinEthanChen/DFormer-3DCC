@@ -13,6 +13,7 @@ from utils.dataloader.RGBXDataset import RGBXDataset
 
 from utils.refocus_augmentation import RefocusImageAugmentation
 from utils.augmentation import Augmentation
+from utils.evaluation.metrics import dice_scores, normalized_surface_distances
 
 from utils.init_func import group_weight
 from utils.init_func import configure_optimizers
@@ -21,12 +22,16 @@ from utils.engine.engine import Engine
 from utils.engine.logger import get_logger
 from utils.pyt_utils import all_reduce_tensor
 from tensorboardX import SummaryWriter
-from val_mm import evaluate, evaluate_msf
+# from val_mm import evaluate, evaluate_msf
 from importlib import import_module
 import datetime
 
 import matplotlib.pyplot as plt
 
+from utils.metrics_new import Metrics
+from torchvision import transforms as T
+from matplotlib.colors import ListedColormap
+import pathlib
 # from eval import evaluate_mid
 
 
@@ -60,7 +65,220 @@ torch._dynamo.config.suppress_errors = True
 
 
 def is_eval(epoch, config):
-    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 10 == 0
+    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 1 == 0
+
+@torch.no_grad()
+def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=False, depth_model=None):
+    print("Evaluating...")
+    model.eval()
+    n_classes = config.num_classes
+    metrics = Metrics(n_classes, config.background, device)
+
+    dice_tools = []
+    nsds = []
+    val_loss_list = []
+
+    for idx, minibatch in enumerate(dataloader):
+        if ((idx + 1) % int(len(dataloader) * 0.5) == 0 or idx == 0) and (
+            (engine.distributed and (engine.local_rank == 0))
+            or (not engine.distributed)
+        ):
+            print(f"Validation Iter: {idx + 1} / {len(dataloader)}")
+        images = minibatch["data"]
+        labels = minibatch["label"]
+        # modal_xs = minibatch["modal_x"]
+        modal_xs = predict_depth(depth_model, images)
+        if len(images.shape) == 3:
+            images = images.unsqueeze(0)
+        if len(modal_xs.shape) == 3:
+            modal_xs = modal_xs.unsqueeze(0)
+        if len(labels.shape) == 2:
+            labels = labels.unsqueeze(0)
+        # print(images.shape,labels.shape)
+        transform = T.Resize((config.image_height, config.image_width))
+        images = transform(images)
+        modal_xs = transform(modal_xs)
+        labels = transform(labels)
+        images = images.to(device)
+        modal_xs = modal_xs.to(device)
+        labels = labels.to(device)
+        
+        # Add 3DCC data augmentation
+        aug = Augmentation()
+
+        for i in range(minibatch["data"].shape[0]):
+            batch = {'positive': {'rgb': None, 'depth_euclidean': None, 'gt': None, 'reshading': None}}
+            
+            batch['positive']['rgb'] = images[i]
+            batch['positive']['depth_euclidean'] = modal_xs[i]
+            batch['positive']['gt'] = labels[i]
+
+            # Crop
+            tasks = ['rgb','depth_euclidean', 'gt']
+            batch['positive'] = aug.crop_augmentation(batch['positive'], tasks, fixed_size=[config.image_height, config.image_width])
+
+            augmented_rgb = aug.augment_rgb(batch)
+
+            augmented_rgb = augmented_rgb.squeeze(0)
+
+            images[i] = augmented_rgb
+
+        # calculate depth for augmented images
+        images = images.cpu()
+        modal_xs = predict_depth(depth_model, images)
+        modal_xs = transform(modal_xs)
+        modal_xs = modal_xs.to(device)
+
+        # Add validation loss
+        val_loss = model(images.to(device), modal_xs, labels)
+        val_loss = val_loss.detach().cpu().numpy()
+        val_loss_list.append(val_loss)
+
+        images = [images.to(device), modal_xs.to(device)]
+
+        # if sliding:
+        #     preds = slide_inference(model, images, modal_xs, config).softmax(dim=1)
+        # else:
+        preds = model(images[0], images[1]).softmax(dim=1)
+        # print(preds.shape,labels.shape)
+        B, H, W = labels.shape
+        metrics.update(preds, labels)
+
+        # DSC and NSD metrics from SeStrongC
+
+        # Convert tensors to numpy arrays
+        preds_np = preds.argmax(dim=1).cpu().numpy()
+        labels_np = labels.cpu().numpy()
+
+        # Convert to boolean arrays
+        preds_bool = preds_np == 1  # Assuming class 1 is the object of interest
+        labels_bool = labels_np == 1  # Same assumption for labels
+
+        for i in range(preds_bool.shape[0]):
+            dice_tool = dice_scores(preds_bool[i], labels_bool[i])
+            dice_tools.append(dice_tool)
+        
+            nsd = normalized_surface_distances(preds_bool[i], labels_bool[i], tau=5) # tau default is 5, arg.tau
+            nsds.append(nsd)
+
+        # for i in range(B):
+        #     metrics.update(preds[i].unsqueeze(0), labels[i].unsqueeze(0))
+        # metrics.update(preds, labels)
+
+        if save_dir is not None:
+            palette = [
+                [128, 64, 128],
+                [244, 35, 232],
+                [70, 70, 70],
+                [102, 102, 156],
+                [190, 153, 153],
+                [153, 153, 153],
+                [250, 170, 30],
+                [220, 220, 0],
+                [107, 142, 35],
+                [152, 251, 152],
+                [70, 130, 180],
+                [220, 20, 60],
+                [255, 0, 0],
+                [0, 0, 142],
+                [0, 0, 70],
+                [0, 60, 100],
+                [0, 80, 100],
+                [0, 0, 230],
+                [119, 11, 32],
+            ]
+            palette = np.array(palette, dtype=np.uint8)
+            cmap = ListedColormap(palette)
+            names = (
+                minibatch["fn"][0]
+                .replace(".jpg", "")
+                .replace(".png", "")
+                .replace("datasets/", "")
+            )
+            save_name = save_dir + "/" + names + "_pred.png"
+            pathlib.Path(save_name).parent.mkdir(parents=True, exist_ok=True)
+            preds = preds.argmax(dim=1).cpu().squeeze().numpy().astype(np.uint8)
+            if config.dataset_name in ["KITTI-360", "EventScape"]:
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
+            elif config.dataset_name in ["NYUDepthv2", "SUNRGBD"]:
+                palette = np.load("./utils/nyucmap.npy")
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
+            elif config.dataset_name in ["MFNet"]:
+                palette = np.array(
+                    [
+                        [0, 0, 0],
+                        [64, 0, 128],
+                        [64, 64, 0],
+                        [0, 128, 192],
+                        [0, 0, 192],
+                        [128, 128, 0],
+                        [64, 64, 128],
+                        [192, 128, 128],
+                        [192, 64, 0],
+                    ],
+                    dtype=np.uint8,
+                )
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
+            else:
+                assert 1 == 2
+
+    # ious, miou = metrics.compute_iou()
+    # acc, macc = metrics.compute_pixel_acc()
+    # f1, mf1 = metrics.compute_f1()
+    if engine.distributed:
+        all_metrics = [None for _ in range(engine.world_size)]
+        # all_predictions = Metrics(n_classes, config.background, device)
+        torch.distributed.all_gather_object(all_metrics, metrics)  # list of lists
+    else:
+        all_metrics = metrics
+
+    mdsc = sum(dice_tools) / len(dice_tools) if dice_tools else float('nan')
+    mnsd = sum(nsds) / len(nsds) if nsds else float('nan')
+
+    # Convert the list to a NumPy array
+    val_loss_list_np = np.array(val_loss_list)
+    # Calculate the mean, ignoring NaN values
+    mval_loss = np.nanmean(val_loss_list_np)
+
+    return all_metrics, mdsc, mnsd, mval_loss
+
+from Depth_Anything_V2.depth_anything_v2.dpt import DepthAnythingV2
+import cv2
+
+def build_depth_estimation_model(device, encoder='vitl'):
+    model_configs = {
+        'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+        'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+        'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+        'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
+    }
+
+    model = DepthAnythingV2(**model_configs[encoder])
+    model.load_state_dict(torch.load(f'./checkpoints/pretrained/depth_anything_v2_{encoder}.pth', map_location='cpu'))
+    model = model.to(device).eval()
+    return model
+
+def predict_depth(depth_model, images):
+    # image shape (B, 3, H, W)
+    depths = torch.zeros_like(images)
+    H, W = images.shape[2], images.shape[3]
+    for batch_idx in range(images.shape[0]):
+        image = images[batch_idx].numpy().transpose(1, 2, 0) # BGR
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # BGR- > RGB
+        # image = cv2.resize(image, (1920, 1080))
+        # plt.imshow(image.astype(np.uint8))
+        # plt.show()
+        depth = depth_model.infer_image(image)
+        depth = (1 - (depth - depth.min()) / (depth.max() - depth.min()))
+        depth = cv2.merge([depth, depth, depth])
+        depths[batch_idx] = torch.from_numpy(depth).permute(2, 0, 1)
+    # plt.imshow(depths[0].permute(1, 2, 0).numpy())
+    # plt.show()
+    # breakpoint()
+    return depths # tensor shape (B, 3, H, W)
 
 
 class gpu_timer:
@@ -172,6 +390,66 @@ def save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values
     
     plt.tight_layout()
     plt.savefig(filename)  # Save the plot to a file
+# Function to save metrics plot
+def save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename):
+    plt.figure(figsize=(15, 10))
+    
+    # Plot mIoU
+    plt.subplot(2, 3, 1)
+    plt.plot(epochs, miou_values, label='mIoU', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mIoU')
+    plt.title('mIoU over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot mIoU
+    plt.subplot(2, 3, 2)
+    plt.plot(epochs, mdsc_values, label='mDSC', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mDSC')
+    plt.title('mDSC over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot mIoU
+    plt.subplot(2, 3, 3)
+    plt.plot(epochs, mnsd_values, label='mNSD', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mNSD')
+    plt.title('mNSD over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot Loss
+    plt.subplot(2, 3, 4)
+    plt.plot(epochs, loss_values, label='Training Loss', color='red')
+    plt.xlabel('Epochs')
+    plt.ylabel('Training Loss')
+    plt.title('Training Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot Loss
+    plt.subplot(2, 3, 5)
+    plt.plot(epochs, val_loss_values, label='Validation Loss', color='red')
+    plt.xlabel('Epochs')
+    plt.ylabel('Validation Loss')
+    plt.title('Validation Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot Learning Rate
+    plt.subplot(2, 3, 6)
+    plt.plot(epochs, learning_rates, label='Learning Rate', color='green')
+    plt.xlabel('Epochs')
+    plt.ylabel('Learning Rate')
+    plt.title('Learning Rate over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(filename)  # Save the plot to a file
 
 with Engine(custom_parser=parser) as engine:
     args = parser.parse_args()
@@ -221,7 +499,7 @@ with Engine(custom_parser=parser) as engine:
         engine,
         RGBXDataset,
         config,
-        val_batch_size=2,
+        val_batch_size=1,
         # val_batch_size=int(config.batch_size * val_dl_factor) if config.dataset_name!="SUNRGBD" else int(args.gpus),
     )
     logger.info(f"val dataset len:{len(val_loader)*int(args.gpus)}")
@@ -307,6 +585,7 @@ with Engine(custom_parser=parser) as engine:
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
+        depth_model = build_depth_estimation_model(device)
 
     engine.register_state(dataloader=train_loader, model=model, optimizer=optimizer)
     if engine.continue_state_object:
@@ -384,7 +663,8 @@ with Engine(custom_parser=parser) as engine:
             minibatch = next(dataloader)
             imgs = minibatch["data"]
             gts = minibatch["label"]
-            modal_xs = minibatch["modal_x"]
+            # modal_xs = minibatch["modal_x"]
+            modal_xs = predict_depth(depth_model, imgs)
 
             imgs = imgs.cuda(non_blocking=True)
             gts = gts.cuda(non_blocking=True)
@@ -457,6 +737,11 @@ with Engine(custom_parser=parser) as engine:
                 # print(imgs.shape) # (B, D, H, W)
                 # print(modal_xs.shape) # (B, 1, H, W)
                 # print(gts.shape) # (B, H, W)
+                imgs = imgs.cpu()
+                modal_xs = predict_depth(depth_model, imgs)
+                modal_xs = modal_xs.cuda(non_blocking=True)
+                imgs = imgs.cuda(non_blocking=True)
+
                 loss = model(imgs, modal_xs, gts)
 
             # reduce the whole loss over multi-gpu
@@ -577,6 +862,7 @@ with Engine(custom_parser=parser) as engine:
                                 engine,
                                 sliding=args.sliding,
                             )
+            
                     if engine.local_rank == 0:
                         metric = all_metrics[0]
                         for other_metric in all_metrics[1:]:
@@ -640,7 +926,9 @@ with Engine(custom_parser=parser) as engine:
                                 device,
                                 engine,
                                 sliding=args.sliding,
+                                depth_model=depth_model,
                             )
+
                     ious, miou = metric.compute_iou()
                     acc, macc = metric.compute_pixel_acc()
                     f1, mf1 = metric.compute_f1()
