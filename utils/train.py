@@ -112,6 +112,66 @@ def set_seed(seed):
     # avoiding nondeterministic algorithms (see https://pytorch.org/docs/stable/notes/randomness.html)
     torch.use_deterministic_algorithms(True, warn_only=True)
 
+# Function to save metrics plot
+def save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename):
+    plt.figure(figsize=(15, 10))
+    
+    # Plot mIoU
+    plt.subplot(2, 3, 1)
+    plt.plot(epochs, miou_values, label='mIoU', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mIoU')
+    plt.title('mIoU over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot mIoU
+    plt.subplot(2, 3, 2)
+    plt.plot(epochs, mdsc_values, label='mDSC', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mDSC')
+    plt.title('mDSC over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot mIoU
+    plt.subplot(2, 3, 3)
+    plt.plot(epochs, mnsd_values, label='mNSD', color='blue')
+    plt.xlabel('Epochs')
+    plt.ylabel('mNSD')
+    plt.title('mNSD over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot Loss
+    plt.subplot(2, 3, 4)
+    plt.plot(epochs, loss_values, label='Training Loss', color='red')
+    plt.xlabel('Epochs')
+    plt.ylabel('Training Loss')
+    plt.title('Training Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot Loss
+    plt.subplot(2, 3, 5)
+    plt.plot(epochs, val_loss_values, label='Validation Loss', color='red')
+    plt.xlabel('Epochs')
+    plt.ylabel('Validation Loss')
+    plt.title('Validation Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot Learning Rate
+    plt.subplot(2, 3, 6)
+    plt.plot(epochs, learning_rates, label='Learning Rate', color='green')
+    plt.xlabel('Epochs')
+    plt.ylabel('Learning Rate')
+    plt.title('Learning Rate over Epochs')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(filename)  # Save the plot to a file
 
 with Engine(custom_parser=parser) as engine:
     args = parser.parse_args()
@@ -287,6 +347,14 @@ with Engine(custom_parser=parser) as engine:
     miou, best_miou = 0.0, 0.0
     train_timer = gpu_timer()
     eval_timer = gpu_timer()
+
+    epochs = []
+    miou_values = []
+    mdsc_values = []
+    mnsd_values = []
+    loss_values = []
+    val_loss_values = []
+    learning_rates = []
 
     if args.amp:
         scaler = torch.cuda.amp.GradScaler()
@@ -480,7 +548,7 @@ with Engine(custom_parser=parser) as engine:
                                     sliding=args.sliding,
                                 )
                             else:
-                                all_metrics = evaluate(
+                                all_metrics, mdsc, mnsd, mval_loss = evaluate(
                                     model,
                                     val_loader,
                                     config,
@@ -501,7 +569,7 @@ with Engine(custom_parser=parser) as engine:
                                 sliding=args.sliding,
                             )
                         else:
-                            all_metrics = evaluate(
+                            all_metrics, mdsc, mnsd, mval_loss = evaluate(
                                 model,
                                 val_loader,
                                 config,
@@ -544,7 +612,7 @@ with Engine(custom_parser=parser) as engine:
                                     sliding=args.sliding,
                                 )
                             else:
-                                metric = evaluate(
+                                metric, mdsc, mnsd, mval_loss = evaluate(
                                     model,
                                     val_loader,
                                     config,
@@ -565,7 +633,7 @@ with Engine(custom_parser=parser) as engine:
                                 sliding=args.sliding,
                             )
                         else:
-                            metric = evaluate(
+                            metric, mdsc, mnsd, mval_loss = evaluate(
                                 model,
                                 val_loader,
                                 config,
@@ -594,6 +662,10 @@ with Engine(custom_parser=parser) as engine:
             )
             eval_timer.stop()
 
+            if epoch != 1: 
+                # Save plot every 10 epochs
+                save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename='metrics_plot.png')
+
         eval_count = 0
         for i in range(engine.state.epoch + 1, config.nepochs + 1):
             if is_eval(i, config):
@@ -608,3 +680,30 @@ with Engine(custom_parser=parser) as engine:
         logger.info(
             f"Avg train time: {train_timer.mean_time:.2f}s, avg eval time: {eval_timer.mean_time:.2f}s, left eval count: {eval_count}, ETA: {eta}"
         )
+
+        epochs.append(epoch)
+        miou_values.append(miou)
+        mdsc_values.append(mdsc)
+        mnsd_values.append(mnsd)
+        loss_values.append(sum_loss.detach().cpu().numpy()/ (idx + 1))
+        val_loss_values.append(mval_loss)
+        learning_rates.append(lr)
+    
+    # Convert lists to numpy arrays
+    epochs_np = np.array(epochs)
+    loss_np = np.array(loss_values)
+    mval_loss_np = np.array(val_loss_values)
+    miou_np = np.array(miou_values)
+    mdsc_np = np.array(mdsc_values)
+    mnsd_np = np.array(mnsd_values)
+    learning_rate_np = np.array(learning_rates)
+
+    # Save data
+    np.savez('metrics.npz', epochs=epochs_np, loss=loss_np, val_loss = mval_loss_np, miou=miou_np, mdsc = mdsc_np, mnsd = mdsc_np, learning_rate=learning_rate_np)
+
+    # # Load data
+    # data = np.load('metrics.npz')
+    # epochs = data['epochs']
+    # loss_values = data['loss']
+    # miou_values = data['miou']
+    # learning_rates = data['learning_rate']

@@ -22,6 +22,7 @@ from utils.metrics_new import Metrics
 
 from utils.refocus_augmentation import RefocusImageAugmentation
 from utils.augmentation import Augmentation
+from utils.evaluation.metrics import dice_scores, normalized_surface_distances
 
 # from semseg.utils.utils import setup_cudnn
 from math import ceil
@@ -88,6 +89,11 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
     n_classes = config.num_classes
     metrics = Metrics(n_classes, config.background, device)
 
+    dice_tools = []
+    nsds = []
+    val_loss_list = []
+
+
     for idx, minibatch in enumerate(dataloader):
         if ((idx + 1) % int(len(dataloader) * 0.5) == 0 or idx == 0) and (
             (engine.distributed and (engine.local_rank == 0))
@@ -132,6 +138,11 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
 
             images[i] = augmented_rgb
 
+        # Add validation loss
+        val_loss = model(images, modal_xs, labels)
+        val_loss = val_loss.detach().cpu().numpy()
+        val_loss_list.append(val_loss)
+
         images = [images.to(device), modal_xs.to(device)]
 
         if sliding:
@@ -141,6 +152,27 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
         # print(preds.shape,labels.shape)
         B, H, W = labels.shape
         metrics.update(preds, labels)
+
+        # DSC and NSD metrics from SeStrongC
+
+        # Convert tensors to numpy arrays
+        preds_np = preds.argmax(dim=1).cpu().numpy()
+        labels_np = labels.cpu().numpy()
+
+        # Convert to boolean arrays
+        preds_bool = preds_np == 1  # Assuming class 1 is the object of interest
+        labels_bool = labels_np == 1  # Same assumption for labels
+
+        for i in range(preds_bool.shape[0]):
+            dice_tool = dice_scores(preds_bool[i], labels_bool[i])
+            dice_tools.append(dice_tool)
+        
+            nsd = normalized_surface_distances(preds_bool[i], labels_bool[i], tau=5) # tau default is 5, arg.tau
+            nsds.append(nsd)
+        
+        
+
+
         # for i in range(B):
         #     metrics.update(preds[i].unsqueeze(0), labels[i].unsqueeze(0))
         # metrics.update(preds, labels)
@@ -214,7 +246,16 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
         torch.distributed.all_gather_object(all_metrics, metrics)  # list of lists
     else:
         all_metrics = metrics
-    return all_metrics
+
+    mdsc = sum(dice_tools) / len(dice_tools) if dice_tools else float('nan')
+    mnsd = sum(nsds) / len(nsds) if nsds else float('nan')
+
+    # Convert the list to a NumPy array
+    val_loss_list_np = np.array(val_loss_list)
+    # Calculate the mean, ignoring NaN values
+    mval_loss = np.nanmean(val_loss_list_np)
+
+    return all_metrics, mdsc, mnsd, mval_loss
 
 
 def slide_inference(model, imgs, modal_xs, config):
