@@ -18,4 +18,4 @@ set -e
 source ~/projects/def-timsbc/ychen506/DFormer-3DCC/dformer/bin/activate
 
 # Run the training script
-bash train.sh
+bash train_ComputeCanada.sh

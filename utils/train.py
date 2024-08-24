@@ -67,7 +67,7 @@ torch._dynamo.config.suppress_errors = True
 
 
 def is_eval(epoch, config):
-    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 2 == 0
+    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 5 == 0
 
 @torch.no_grad()
 def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=False, depth_model=None):
@@ -259,7 +259,7 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
             else:
                 assert 1 == 2
 
-        # if idx >= 100:
+        # if idx >= 10:
         #     break
 
     # ious, miou = metrics.compute_iou()
@@ -476,7 +476,7 @@ with Engine(custom_parser=parser) as engine:
         engine,
         RGBXDataset,
         config,
-        val_batch_size=1,
+        val_batch_size=2,
         # val_batch_size=int(config.batch_size * val_dl_factor) if config.dataset_name!="SUNRGBD" else int(args.gpus),
     )
     logger.info(f"val dataset len:{len(val_loader)*int(args.gpus)}")
@@ -559,6 +559,7 @@ with Engine(custom_parser=parser) as engine:
                 output_device=engine.local_rank,
                 find_unused_parameters=False,
             )
+            depth_model = build_depth_estimation_model(engine.local_rank)
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
@@ -828,6 +829,7 @@ with Engine(custom_parser=parser) as engine:
                                 device,
                                 engine,
                                 sliding=args.sliding,
+                                depth_model=depth_model,
                             )
                     else:
                         all_metrics, mdsc, mnsd, mval_loss = evaluate(
@@ -837,6 +839,7 @@ with Engine(custom_parser=parser) as engine:
                             device,
                             engine,
                             sliding=args.sliding,
+                            depth_model=depth_model,
                         )
             
                     if engine.local_rank == 0:
@@ -891,6 +894,7 @@ with Engine(custom_parser=parser) as engine:
                             device,
                             engine,
                             sliding=args.sliding,
+                            depth_model=depth_model,
                         )
 
                     ious, miou = metric.compute_iou()
@@ -968,7 +972,17 @@ with Engine(custom_parser=parser) as engine:
         miou_values.append(miou)
         mdsc_values.append(mdsc)
         mnsd_values.append(mnsd)
-        loss_values.append(sum_loss.detach().cpu().numpy()/ (idx + 1))
+        # loss_values.append(sum_loss.detach().cpu().numpy()/ (idx + 1))
+        if isinstance(sum_loss, torch.Tensor):
+            # If sum_loss is a tensor, detach it, move to CPU, and convert to NumPy
+            loss_values.append(sum_loss.detach().cpu().numpy() / (idx + 1))
+        elif isinstance(sum_loss, float):
+            # If sum_loss is already a float, directly perform the calculation
+            loss_values.append(sum_loss / (idx + 1))
+        else:
+            # Handle unexpected types
+            raise TypeError(f"Expected sum_loss to be a tensor or float, but got {type(sum_loss)}")
+
         val_loss_values.append(mval_loss)
         learning_rates.append(lr)
     
