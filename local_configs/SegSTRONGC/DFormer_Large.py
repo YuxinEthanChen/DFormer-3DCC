@@ -8,22 +8,22 @@ C.decoder_embed_dim = 512
 C.optimizer = "AdamW"
 
 """Train Config"""
-C.lr = 6e-5
+C.lr = 1e-6 #6e-5
 C.lr_power = 0.9
 C.momentum = 0.9
-C.weight_decay = 0.01
+C.weight_decay = 0.1
 C.batch_size = 4
 C.nepochs = 50
-C.niters_per_epoch = 10
-# C.niters_per_epoch = C.num_train_imgs // C.batch_size + 1
+# C.niters_per_epoch = 100
+C.niters_per_epoch = C.num_train_imgs // C.batch_size + 1
 C.num_workers = 4
 C.train_scale_array = [0.5, 0.75, 1, 1.25, 1.5, 1.75]
-C.warm_up_epoch = 10
+C.warm_up_epoch = 0
 
 C.fix_bias = True
 C.bn_eps = 1e-3
 C.bn_momentum = 0.1
-C.drop_path_rate = 0.15
+C.drop_path_rate = 0.5 # 0.15
 C.aux_rate = 0.0
 
 """Eval Config"""

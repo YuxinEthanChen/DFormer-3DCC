@@ -13,13 +13,39 @@ from utils.transforms import (
 )
 
 
-def random_mirror(rgb, gt, modal_x):
+def random_mirror(rgb, gt):
     if random.random() >= 0.5:
         rgb = cv2.flip(rgb, 1)
         gt = cv2.flip(gt, 1)
-        modal_x = cv2.flip(modal_x, 1)
 
-    return rgb, gt, modal_x
+    return rgb, gt
+
+def random_rotate(rgb, gt):
+    height, width = rgb.shape[:2]
+    
+    # Check if height and width are the same
+    if height == width:
+        # Randomly choose a rotation angle: 0, 90, 180, or 270 degrees
+        angle = random.choice([0, 90, 180, 270])
+
+        # print("rotated ", angle)
+        
+        # Determine the rotation code for cv2.rotate
+        if angle == 90:
+            rotate_code = cv2.ROTATE_90_CLOCKWISE
+        elif angle == 180:
+            rotate_code = cv2.ROTATE_180
+        elif angle == 270:
+            rotate_code = cv2.ROTATE_90_COUNTERCLOCKWISE
+        else:  # No rotation
+            rotate_code = None
+        
+        # Apply the rotation if a rotation code is selected
+        if rotate_code is not None:
+            rgb = cv2.rotate(rgb, rotate_code)
+            gt = cv2.rotate(gt, rotate_code)
+    
+    return rgb, gt
 
 
 def random_scale(rgb, gt, modal_x, scales):
@@ -41,7 +67,9 @@ class TrainPre(object):
         self.sign = sign
 
     def __call__(self, rgb, gt):
-        # rgb, gt = random_mirror(rgb, gt)
+        rgb, gt = random_mirror(rgb, gt)
+        
+        
         # # Turn off scale
         # if self.config.train_scale_array is not None:
         #     rgb, gt, modal_x, scale = random_scale(
@@ -71,6 +99,11 @@ class TrainPre(object):
         p_rgb = cv2.resize(rgb, resize_size)
         p_gt = cv2.resize(gt, resize_size, interpolation=cv2.INTER_NEAREST)
         # p_modal_x = cv2.resize(modal_x, resize_size)
+
+        # Random rotate 90, 180, 270
+        p_rgb, p_gt = random_rotate(p_rgb, p_gt)
+        
+
 
         p_rgb = p_rgb.transpose(2, 0, 1)
         # p_modal_x = p_modal_x.transpose(2, 0, 1)

@@ -32,6 +32,8 @@ from utils.metrics_new import Metrics
 from torchvision import transforms as T
 from matplotlib.colors import ListedColormap
 import pathlib
+from PIL import Image
+import shutil
 # from eval import evaluate_mid
 
 
@@ -65,7 +67,7 @@ torch._dynamo.config.suppress_errors = True
 
 
 def is_eval(epoch, config):
-    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 1 == 0
+    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 2 == 0
 
 @torch.no_grad()
 def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=False, depth_model=None):
@@ -77,6 +79,7 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
     dice_tools = []
     nsds = []
     val_loss_list = []
+    new_validation = True
 
     for idx, minibatch in enumerate(dataloader):
         if ((idx + 1) % int(len(dataloader) * 0.5) == 0 or idx == 0) and (
@@ -113,15 +116,46 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
             batch['positive']['depth_euclidean'] = modal_xs[i]
             batch['positive']['gt'] = labels[i]
 
-            # Crop
-            tasks = ['rgb','depth_euclidean', 'gt']
-            batch['positive'] = aug.crop_augmentation(batch['positive'], tasks, fixed_size=[config.image_height, config.image_width])
+            # # Turn off Crop for Validation
+            # tasks = ['rgb','depth_euclidean', 'gt']
+            # batch['positive'] = aug.crop_augmentation(batch['positive'], tasks, fixed_size=[config.image_height, config.image_width])
 
-            augmented_rgb = aug.augment_rgb(batch)
+            batch['positive']['rgb'] = batch['positive']['rgb'].unsqueeze(0)
+            batch['positive']['depth_euclidean'] = batch['positive']['depth_euclidean'].unsqueeze(0)
+            batch['positive']['gt'] = batch['positive']['gt'].unsqueeze(0)
+           
+
+            augmented_rgb = aug.augment_rgb_val(batch)
 
             augmented_rgb = augmented_rgb.squeeze(0)
 
             images[i] = augmented_rgb
+
+            # Save validation imgs
+            # Specify the path where you want to save the image
+            base_path = config.log_dir
+            folder_name = 'val_imgs'
+            folder_path = os.path.join(base_path, folder_name)
+
+            if new_validation:
+                if os.path.exists(folder_path):
+                    shutil.rmtree(folder_path)
+                    print(f"Deleted existing folder: {folder_path}")
+                new_validation = False
+            
+            # Create the folder if it doesn't exist
+            os.makedirs(folder_path, exist_ok=True)
+            # Convert from BGR to RGB by reversing the channels
+            image_tensor = images[i][[2, 1, 0], :, :]
+            # Detach, move to CPU, and convert the tensor to a NumPy array with correct channel order
+            image_array = image_tensor.detach().cpu().numpy().transpose(1, 2, 0).astype(np.uint8)  # [C, H, W] to [H, W, C]
+            # Convert the NumPy array to an Image object
+            image = Image.fromarray(image_array)
+            # Specify the file name and save the image
+            file_name = f'img_{idx}_{i}.png'
+            image_path = os.path.join(folder_path, file_name)
+            image.save(image_path)
+
 
         # calculate depth for augmented images
         images = images.cpu()
@@ -225,8 +259,8 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
             else:
                 assert 1 == 2
 
-        if idx >= 10:
-            break
+        # if idx >= 100:
+        #     break
 
     # ious, miou = metrics.compute_iou()
     # acc, macc = metrics.compute_pixel_acc()
@@ -333,66 +367,6 @@ def set_seed(seed):
     # avoiding nondeterministic algorithms (see https://pytorch.org/docs/stable/notes/randomness.html)
     torch.use_deterministic_algorithms(True, warn_only=True)
 
-# Function to save metrics plot
-def save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename):
-    plt.figure(figsize=(15, 10))
-    
-    # Plot mIoU
-    plt.subplot(2, 3, 1)
-    plt.plot(epochs, miou_values, label='mIoU', color='blue')
-    plt.xlabel('Epochs')
-    plt.ylabel('mIoU')
-    plt.title('mIoU over Epochs')
-    plt.legend()
-    plt.grid(True)
-
-    # Plot mIoU
-    plt.subplot(2, 3, 2)
-    plt.plot(epochs, mdsc_values, label='mDSC', color='blue')
-    plt.xlabel('Epochs')
-    plt.ylabel('mDSC')
-    plt.title('mDSC over Epochs')
-    plt.legend()
-    plt.grid(True)
-
-    # Plot mIoU
-    plt.subplot(2, 3, 3)
-    plt.plot(epochs, mnsd_values, label='mNSD', color='blue')
-    plt.xlabel('Epochs')
-    plt.ylabel('mNSD')
-    plt.title('mNSD over Epochs')
-    plt.legend()
-    plt.grid(True)
-    
-    # Plot Loss
-    plt.subplot(2, 3, 4)
-    plt.plot(epochs, loss_values, label='Training Loss', color='red')
-    plt.xlabel('Epochs')
-    plt.ylabel('Training Loss')
-    plt.title('Training Loss over Epochs')
-    plt.legend()
-    plt.grid(True)
-
-    # Plot Loss
-    plt.subplot(2, 3, 5)
-    plt.plot(epochs, val_loss_values, label='Validation Loss', color='red')
-    plt.xlabel('Epochs')
-    plt.ylabel('Validation Loss')
-    plt.title('Validation Loss over Epochs')
-    plt.legend()
-    plt.grid(True)
-    
-    # Plot Learning Rate
-    plt.subplot(2, 3, 6)
-    plt.plot(epochs, learning_rates, label='Learning Rate', color='green')
-    plt.xlabel('Epochs')
-    plt.ylabel('Learning Rate')
-    plt.title('Learning Rate over Epochs')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.savefig(filename)  # Save the plot to a file
 # Function to save metrics plot
 def save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename):
     plt.figure(figsize=(15, 10))
@@ -627,6 +601,7 @@ with Engine(custom_parser=parser) as engine:
     else:
         compiled_model = model
     miou, best_miou = 0.0, 0.0
+    mval_loss, best_mval_loss = 10.0, 10.0
     train_timer = gpu_timer()
     eval_timer = gpu_timer()
 
@@ -655,6 +630,8 @@ with Engine(custom_parser=parser) as engine:
         #     # bar_format=bar_format,
         # )
         dataloader = iter(train_loader)
+
+        new_train = True
 
         sum_loss = 0
         i = 0
@@ -691,10 +668,8 @@ with Engine(custom_parser=parser) as engine:
                 # # Visulization
                 # # Original Image (before augmentation)
                 # original_rgb = imgs[i].permute(1, 2, 0).cpu().numpy()  # Convert to HxWxC
-
                 # # If original image is in BGR format, convert to RGB
                 # original_rgb = original_rgb[..., [2, 1, 0]]  # Swap BGR to RGB
-
                 # # Normalize original image to [0, 1] range
                 # original_rgb = (original_rgb - original_rgb.min()) / (original_rgb.max() - original_rgb.min())
 
@@ -703,31 +678,53 @@ with Engine(custom_parser=parser) as engine:
                 augmented_rgb = augmented_rgb.squeeze(0)
                 imgs[i] = augmented_rgb
 
+
+                # Save train imgs
+                # Specify the path where you want to save the image
+                base_path = config.log_dir
+                folder_name = 'train_imgs'
+                folder_path = os.path.join(base_path, folder_name)    
+                if new_train:            
+                    if os.path.exists(folder_path):
+                        shutil.rmtree(folder_path)
+                        print(f"Deleted existing folder: {folder_path}")
+                    new_train = False
+                # Create the folder if it doesn't exist
+                os.makedirs(folder_path, exist_ok=True)
+                # Convert from BGR to RGB by reversing the channels
+                image_tensor = imgs[i][[2, 1, 0], :, :]
+                # Detach, move to CPU, and convert the tensor to a NumPy array with correct channel order
+                image_array = image_tensor.detach().cpu().numpy().transpose(1, 2, 0).astype(np.uint8)  # [C, H, W] to [H, W, C]
+                # Convert the NumPy array to an Image object
+                image = Image.fromarray(image_array)
+                # Specify the file name and save the image
+                file_name = f'img_{idx}_{i}.png'
+                image_path = os.path.join(folder_path, file_name)
+                image.save(image_path)
+
                 # # Visulization
                 # # Convert to NumPy if necessary
                 # augmented_rgb_vis = augmented_rgb.permute(1, 2, 0).cpu().numpy()  # Change from CxHxW to HxWxC
-
                 # # If the image is in BGR, convert it to RGB
                 # augmented_rgb_vis = augmented_rgb_vis[..., [2, 1, 0]] # Swap BGR to RGB
-
                 # # Normalize to [0, 1]
                 # augmented_rgb_vis = (augmented_rgb_vis - augmented_rgb_vis.min()) / (augmented_rgb_vis.max() - augmented_rgb_vis.min())
-
                 # # Display the original and augmented images side by side
-                # plt.figure(figsize=(10, 5))
-
+                # plt.figure(figsize=(15, 5))
                 # # Original Image
-                # plt.subplot(1, 2, 1)
+                # plt.subplot(1, 3, 1)
                 # plt.imshow(original_rgb)
                 # plt.title('Original Image')
                 # plt.axis('off')
-
                 # # Augmented Image
-                # plt.subplot(1, 2, 2)
+                # plt.subplot(1, 3, 2)
                 # plt.imshow(augmented_rgb_vis)
                 # plt.title('Augmented Image')
                 # plt.axis('off')
-
+                # # plt.subplot(1, 3, 3)
+                # # plt.imshow(modal_xs)
+                # # plt.title('Depth')
+                # # plt.axis('off')
                 # plt.show()
 
             if args.amp:
@@ -849,6 +846,18 @@ with Engine(custom_parser=parser) as engine:
                         ious, miou = metric.compute_iou()
                         acc, macc = metric.compute_pixel_acc()
                         f1, mf1 = metric.compute_f1()
+
+                        if mval_loss < best_mval_loss:
+                            best_mval_loss = mval_loss
+                            engine.save_and_link_checkpoint(
+                                config.log_dir,
+                                config.log_dir,
+                                config.log_dir_link,
+                                infor="_mval_loss_" + str(mval_loss),
+                                metric=mval_loss,
+                            )
+                        print("mval_loss", mval_loss, "best_mval_loss", best_mval_loss)
+
                         if miou > best_miou:
                             best_miou = miou
                             engine.save_and_link_checkpoint(
@@ -890,6 +899,17 @@ with Engine(custom_parser=parser) as engine:
                     # print('miou',miou)
                 # print('acc, macc, f1, mf1, ious, miou',acc, macc, f1, mf1, ious, miou)
                 # print('miou',miou)
+                if mval_loss < best_mval_loss:
+                    best_mval_loss = mval_loss
+                    engine.save_and_link_checkpoint(
+                        config.log_dir,
+                        config.log_dir,
+                        config.log_dir_link,
+                        infor="_mval_loss_" + str(mval_loss),
+                        metric=mval_loss,
+                    )
+                print("mval_loss", mval_loss, "best_mval_loss", best_mval_loss)
+                
                 if miou > best_miou:
                     best_miou = miou
                     engine.save_and_link_checkpoint(
@@ -901,13 +921,33 @@ with Engine(custom_parser=parser) as engine:
                     )
                 print("miou", miou, "best", best_miou)
             logger.info(
-                f"Epoch {epoch} validation result: mIoU {miou}, best mIoU {best_miou}"
+                f"Epoch {epoch} validation result: mIoU {miou}, best mIoU {best_miou}, mval_loss, {mval_loss}, best_mval_loss, {best_mval_loss}"
             )
             eval_timer.stop()
 
             if epoch != 1: 
                 # Save plot every 10 epochs
-                save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename='metrics_plot.png')
+                save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename=config.log_dir + '/metrics_plot.png')
+
+                # Convert lists to numpy arrays
+                epochs_np = np.array(epochs)
+                loss_np = np.array(loss_values)
+                mval_loss_np = np.array(val_loss_values)
+                miou_np = np.array(miou_values)
+                mdsc_np = np.array(mdsc_values)
+                mnsd_np = np.array(mnsd_values)
+                learning_rate_np = np.array(learning_rates)
+
+                # Save data
+                np.savez(config.log_dir+'/metrics.npz', epochs=epochs_np, loss=loss_np, val_loss = mval_loss_np, miou=miou_np, mdsc = mdsc_np, mnsd = mdsc_np, learning_rate=learning_rate_np)
+
+                # # Load data
+                # data = np.load('metrics.npz')
+                # epochs = data['epochs']
+                # loss_values = data['loss']
+                # miou_values = data['miou']
+                # learning_rates = data['learning_rate']
+
 
         eval_count = 0
         for i in range(engine.state.epoch + 1, config.nepochs + 1):
@@ -932,21 +972,3 @@ with Engine(custom_parser=parser) as engine:
         val_loss_values.append(mval_loss)
         learning_rates.append(lr)
     
-    # Convert lists to numpy arrays
-    epochs_np = np.array(epochs)
-    loss_np = np.array(loss_values)
-    mval_loss_np = np.array(val_loss_values)
-    miou_np = np.array(miou_values)
-    mdsc_np = np.array(mdsc_values)
-    mnsd_np = np.array(mnsd_values)
-    learning_rate_np = np.array(learning_rates)
-
-    # Save data
-    np.savez('metrics.npz', epochs=epochs_np, loss=loss_np, val_loss = mval_loss_np, miou=miou_np, mdsc = mdsc_np, mnsd = mdsc_np, learning_rate=learning_rate_np)
-
-    # # Load data
-    # data = np.load('metrics.npz')
-    # epochs = data['epochs']
-    # loss_values = data['loss']
-    # miou_values = data['miou']
-    # learning_rates = data['learning_rate']

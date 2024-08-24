@@ -11,12 +11,32 @@ from PIL import Image
 
 def fog_3d(rgb, depth):
     
-    alpha = (torch.rand(1)*12 + 3).cuda() 
+    alpha = (torch.rand(1)*10 + 1).cuda() 
     t = torch.exp(-alpha*depth)   
     #transmission: linear approx
 #     t2 = 0.03/depth    
     t_choose = t
-    I_s = rgb.mean() #1 #rgb.mean() #atmosphere color
+    
+    # I_s = rgb.mean() #1 #rgb.mean() #atmosphere color
+    I_s = torch.rand(1)*245 + 5
+    I_s = I_s.cuda()
+
+    fog_img = t_choose * rgb + I_s * (1-t_choose)
+
+    return fog_img
+
+def fog_3d_val(rgb, depth):
+    
+    alpha = (torch.rand(1)*7 + 1).cuda() 
+    t = torch.exp(-alpha*depth)   
+    #transmission: linear approx
+#     t2 = 0.03/depth    
+    t_choose = t
+    
+    # I_s = rgb.mean() #1 #rgb.mean() #atmosphere color
+    I_s = torch.rand(1)*215 + 20
+    I_s = I_s.cuda()
+
     fog_img = t_choose * rgb + I_s * (1-t_choose)
 
     return fog_img
