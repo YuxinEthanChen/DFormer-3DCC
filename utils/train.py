@@ -929,6 +929,14 @@ with Engine(custom_parser=parser) as engine:
             )
             eval_timer.stop()
 
+            engine.save_and_link_checkpoint_latest(
+                        config.log_dir,
+                        config.log_dir,
+                        config.log_dir_link,
+                        infor="",
+                        metric=None,
+                    )
+
             if epoch != 1: 
                 # Save plot every 10 epochs
                 save_metrics_plot(epochs, miou_values, mdsc_values, mnsd_values, loss_values, val_loss_values, learning_rates, filename=config.log_dir + '/metrics_plot.png')

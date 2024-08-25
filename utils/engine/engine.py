@@ -158,6 +158,17 @@ class Engine(object):
         checkpoint = osp.join(checkpoint_dir, f"epoch-{self.state.epoch}{infor}.pth")
         self.save_checkpoint(checkpoint)
 
+    def save_and_link_checkpoint_latest(
+        self, checkpoint_dir, log_dir, log_dir_link, infor="", metric=None
+    ):
+        ensure_dir(checkpoint_dir)
+        if not osp.exists(log_dir_link):
+            link_file(log_dir, log_dir_link)
+        
+        # No need to keep multiple checkpoints if we're always saving as "latest.pth"
+        checkpoint = osp.join(checkpoint_dir, "latest.pth")
+        self.save_checkpoint(checkpoint)
+
     def restore_checkpoint(self):
         t_start = time.time()
         if self.distributed:

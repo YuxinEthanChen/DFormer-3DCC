@@ -2,7 +2,7 @@
 #SBATCH --gpus-per-node=v100l:2
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=10G
-#SBATCH --time=23:59:00
+#SBATCH --time=47:59:00
 #SBATCH --account=def-timsbc
 #SBATCH --job-name=DFormer-3DCC
 #SBATCH --output=%x-%j.out
